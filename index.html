@@ -26,7 +26,26 @@
         .input-section {
             display: flex;
             gap: 10px;
-            margin-bottom: 30px;
+            margin-bottom: 10px;
+        }
+
+        .history-section {
+            margin-bottom: 20px;
+        }
+
+        #history-select {
+            width: 100%;
+            padding: 8px 12px;
+            font-size: 14px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            background: white;
+            color: #333;
+        }
+
+        #history-select:focus {
+            outline: none;
+            border-color: #ff6600;
         }
 
         #url-input {
@@ -114,16 +133,29 @@
         }
 
         .comment.unread {
-            font-weight: bold;
             border-left-color: #ff6600;
         }
 
-        .comment.unread .comment-text {
-            font-weight: bold;
+        .comment.read {
+            opacity: 0.6;
         }
 
-        .comment.read .comment-text {
-            font-weight: normal;
+        .comment.collapsed-parent > .comment-text {
+            display: none;
+        }
+
+        .comment.collapsed-parent > .comment-preview {
+            display: block;
+            color: #666;
+            font-style: italic;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+        }
+
+        .comment-preview {
+            display: none;
         }
 
         .comment-header {
@@ -272,11 +304,19 @@
         <button id="load-btn" onclick="loadThread()">Load Thread</button>
     </div>
 
+    <div class="history-section">
+        <select id="history-select" onchange="loadFromHistory()">
+            <option value="">-- Recent threads --</option>
+        </select>
+    </div>
+
     <div id="content"></div>
 
     <script>
         const HN_API_BASE = 'https://hacker-news.firebaseio.com/v0';
         const STORAGE_KEY = 'hn-read-comments';
+        const COLLAPSED_KEY = 'hn-collapsed-comments';
+        const HISTORY_KEY = 'hn-thread-history';
 
         // Get read comments from localStorage
         function getReadComments() {
@@ -292,12 +332,86 @@
             localStorage.setItem(STORAGE_KEY, JSON.stringify(readComments));
         }
 
+        // Get collapsed comments from localStorage
+        function getCollapsedComments() {
+            try {
+                return JSON.parse(localStorage.getItem(COLLAPSED_KEY) || '{}');
+            } catch {
+                return {};
+            }
+        }
+
+        // Save collapsed comments to localStorage
+        function saveCollapsedComments(collapsed) {
+            localStorage.setItem(COLLAPSED_KEY, JSON.stringify(collapsed));
+        }
+
+        // Get thread history from localStorage
+        function getThreadHistory() {
+            try {
+                return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+            } catch {
+                return [];
+            }
+        }
+
+        // Save thread to history
+        function saveToHistory(id, title) {
+            let history = getThreadHistory();
+            // Remove if already exists
+            history = history.filter(h => h.id !== id);
+            // Add to front
+            history.unshift({ id, title, timestamp: Date.now() });
+            // Keep only last 20
+            history = history.slice(0, 20);
+            localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+            populateHistoryDropdown();
+        }
+
+        // Populate history dropdown
+        function populateHistoryDropdown() {
+            const select = document.getElementById('history-select');
+            const history = getThreadHistory();
+
+            // Clear existing options except the first one
+            select.innerHTML = '<option value="">-- Recent threads --</option>';
+
+            history.forEach(item => {
+                const option = document.createElement('option');
+                option.value = item.id;
+                option.textContent = item.title.length > 60
+                    ? item.title.substring(0, 60) + '...'
+                    : item.title;
+                select.appendChild(option);
+            });
+        }
+
+        // Load thread from history dropdown
+        function loadFromHistory() {
+            const select = document.getElementById('history-select');
+            const id = select.value;
+            if (!id) return;
+
+            document.getElementById('url-input').value = id;
+            loadThread();
+            select.value = ''; // Reset dropdown
+        }
+
         // Mark a comment as read
         function markAsRead(commentId) {
             const readComments = getReadComments();
             readComments[commentId] = Date.now();
             saveReadComments(readComments);
             updateCommentUI(commentId, true);
+            updateStats();
+        }
+
+        // Mark a comment as unread
+        function markAsUnread(commentId) {
+            const readComments = getReadComments();
+            delete readComments[commentId];
+            saveReadComments(readComments);
+            updateCommentUI(commentId, false);
             updateStats();
         }
 
@@ -349,7 +463,17 @@
             if (!repliesEl || !btn) return;
 
             const isCollapsed = repliesEl.classList.toggle('collapsed');
+            commentEl.classList.toggle('collapsed-parent', isCollapsed);
             btn.textContent = isCollapsed ? '+' : '−';
+
+            // Save to localStorage
+            const collapsed = getCollapsedComments();
+            if (isCollapsed) {
+                collapsed[commentId] = true;
+            } else {
+                delete collapsed[commentId];
+            }
+            saveCollapsedComments(collapsed);
         }
 
         // Update the UI for a single comment
@@ -357,14 +481,19 @@
             const commentEl = document.querySelector(`[data-comment-id="${commentId}"]`);
             if (!commentEl) return;
 
+            const readBtn = commentEl.querySelector(':scope > .comment-header .mark-read-btn');
+            const unreadBtn = commentEl.querySelector(':scope > .comment-header .mark-unread-btn');
+
             if (isRead) {
                 commentEl.classList.remove('unread');
                 commentEl.classList.add('read');
-                const btn = commentEl.querySelector('.mark-read-btn');
-                if (btn) btn.style.display = 'none';
+                if (readBtn) readBtn.style.display = 'none';
+                if (unreadBtn) unreadBtn.style.display = '';
             } else {
                 commentEl.classList.remove('read');
                 commentEl.classList.add('unread');
+                if (readBtn) readBtn.style.display = '';
+                if (unreadBtn) unreadBtn.style.display = 'none';
             }
         }
 
@@ -456,8 +585,16 @@
             return comment.replies.reduce((sum, reply) => sum + 1 + countReplies(reply), 0);
         }
 
+        // Get a text preview (first ~100 chars, strip HTML)
+        function getTextPreview(html) {
+            if (!html) return '';
+            const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+            if (text.length <= 100) return text;
+            return text.substring(0, 100) + '...';
+        }
+
         // Render a single comment
-        function renderComment(comment, readComments) {
+        function renderComment(comment, readComments, collapsedComments) {
             if (comment.deleted || comment.dead) {
                 return `
                     <div class="comment deleted-comment" data-comment-id="${comment.id}">
@@ -468,19 +605,21 @@
 
             const isRead = !!readComments[comment.id];
             const statusClass = isRead ? 'read' : 'unread';
+            const hasReplies = comment.replies && comment.replies.length > 0;
+            const isCollapsed = hasReplies && !!collapsedComments[comment.id];
 
-            const repliesHtml = comment.replies && comment.replies.length > 0
-                ? `<div class="replies">${comment.replies.map(r => renderComment(r, readComments)).join('')}</div>`
+            const repliesHtml = hasReplies
+                ? `<div class="replies${isCollapsed ? ' collapsed' : ''}">${comment.replies.map(r => renderComment(r, readComments, collapsedComments)).join('')}</div>`
                 : '';
 
-            const hasReplies = comment.replies && comment.replies.length > 0;
             const replyCount = hasReplies ? countReplies(comment) : 0;
+            const preview = getTextPreview(comment.text);
 
             return `
-                <div class="comment ${statusClass}" data-comment-id="${comment.id}">
+                <div class="comment ${statusClass}${isCollapsed ? ' collapsed-parent' : ''}" data-comment-id="${comment.id}">
                     <div class="comment-header">
                         <span class="comment-meta">
-                            ${hasReplies ? `<button class="collapse-btn" onclick="toggleCollapse(${comment.id})">−</button>` : ''}
+                            ${hasReplies ? `<button class="collapse-btn" onclick="toggleCollapse(${comment.id})">${isCollapsed ? '+' : '−'}</button>` : ''}
                             <a href="https://news.ycombinator.com/user?id=${comment.by}" target="_blank">${comment.by || 'unknown'}</a>
                             · ${formatTime(comment.time)}
                             ${hasReplies ? `· ${replyCount} repl${replyCount === 1 ? 'y' : 'ies'}` : ''}
@@ -488,11 +627,13 @@
                         </span>
                         <div class="comment-actions">
                             <button class="mark-read-btn" onclick="markAsRead(${comment.id})" ${isRead ? 'style="display:none"' : ''}>Mark Read</button>
+                            <button class="mark-unread-btn" onclick="markAsUnread(${comment.id})" ${isRead ? '' : 'style="display:none"'}>Mark Unread</button>
                             ${hasReplies
                                 ? `<button onclick="markTreeAsRead(${comment.id})">Mark Tree Read</button>`
                                 : ''}
                         </div>
                     </div>
+                    <div class="comment-preview">${preview}</div>
                     <div class="comment-text">${comment.text || ''}</div>
                     ${repliesHtml}
                 </div>
@@ -533,6 +674,7 @@
                 // Fetch all comments
                 const comments = story.kids ? await fetchComments(story.kids) : [];
                 const readComments = getReadComments();
+                const collapsedComments = getCollapsedComments();
 
                 // Render story header
                 let html = `
@@ -558,12 +700,15 @@
                     </div>
                     <div class="stats" id="stats"></div>
                     <div id="comments-container">
-                        ${comments.map(c => renderComment(c, readComments)).join('')}
+                        ${comments.map(c => renderComment(c, readComments, collapsedComments)).join('')}
                     </div>
                 `;
 
                 contentDiv.innerHTML = html;
                 updateStats();
+
+                // Save to history
+                saveToHistory(story.id.toString(), story.title);
 
             } catch (error) {
                 contentDiv.innerHTML = `<div class="error">Error loading thread: ${error.message}</div>`;
@@ -577,6 +722,9 @@
         document.getElementById('url-input').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') loadThread();
         });
+
+        // Initialize history dropdown
+        populateHistoryDropdown();
 
         // Check for URL in query string
         const params = new URLSearchParams(window.location.search);
