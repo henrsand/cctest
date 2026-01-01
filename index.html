@@ -392,7 +392,7 @@
             const id = select.value;
             if (!id) return;
 
-            document.getElementById('url-input').value = id;
+            document.getElementById('url-input').value = `https://news.ycombinator.com/item?id=${id}`;
             loadThread();
             select.value = ''; // Reset dropdown
         }
@@ -453,26 +453,70 @@
             updateStats();
         }
 
-        // Toggle collapse/expand of replies
+        // Toggle collapse/expand of a comment (text + replies)
         function toggleCollapse(commentId) {
             const commentEl = document.querySelector(`[data-comment-id="${commentId}"]`);
             if (!commentEl) return;
 
             const repliesEl = commentEl.querySelector(':scope > .replies');
             const btn = commentEl.querySelector(':scope > .comment-header .collapse-btn');
-            if (!repliesEl || !btn) return;
+            if (!btn) return;
 
-            const isCollapsed = repliesEl.classList.toggle('collapsed');
-            commentEl.classList.toggle('collapsed-parent', isCollapsed);
-            btn.textContent = isCollapsed ? '+' : '−';
+            const isCurrentlyCollapsed = commentEl.classList.contains('collapsed-parent');
+            const newCollapsed = !isCurrentlyCollapsed;
+
+            // Toggle comment collapse state
+            commentEl.classList.toggle('collapsed-parent', newCollapsed);
+            btn.textContent = newCollapsed ? '+' : '−';
+
+            // Also collapse replies if they exist
+            if (repliesEl) {
+                repliesEl.classList.toggle('collapsed', newCollapsed);
+            }
 
             // Save to localStorage
             const collapsed = getCollapsedComments();
-            if (isCollapsed) {
+            if (newCollapsed) {
                 collapsed[commentId] = true;
             } else {
                 delete collapsed[commentId];
             }
+            saveCollapsedComments(collapsed);
+        }
+
+        // Collapse a comment (used for auto-collapse on read)
+        function collapseComment(commentId) {
+            const commentEl = document.querySelector(`[data-comment-id="${commentId}"]`);
+            if (!commentEl) return;
+
+            const repliesEl = commentEl.querySelector(':scope > .replies');
+            const btn = commentEl.querySelector(':scope > .comment-header .collapse-btn');
+
+            commentEl.classList.add('collapsed-parent');
+            if (btn) btn.textContent = '+';
+            if (repliesEl) repliesEl.classList.add('collapsed');
+
+            // Save to localStorage
+            const collapsed = getCollapsedComments();
+            collapsed[commentId] = true;
+            saveCollapsedComments(collapsed);
+        }
+
+        // Expand a comment (used for auto-expand on unread)
+        function expandComment(commentId) {
+            const commentEl = document.querySelector(`[data-comment-id="${commentId}"]`);
+            if (!commentEl) return;
+
+            const repliesEl = commentEl.querySelector(':scope > .replies');
+            const btn = commentEl.querySelector(':scope > .comment-header .collapse-btn');
+
+            commentEl.classList.remove('collapsed-parent');
+            if (btn) btn.textContent = '−';
+            if (repliesEl) repliesEl.classList.remove('collapsed');
+
+            // Remove from localStorage
+            const collapsed = getCollapsedComments();
+            delete collapsed[commentId];
             saveCollapsedComments(collapsed);
         }
 
@@ -489,11 +533,15 @@
                 commentEl.classList.add('read');
                 if (readBtn) readBtn.style.display = 'none';
                 if (unreadBtn) unreadBtn.style.display = '';
+                // Auto-collapse when marked as read
+                collapseComment(commentId);
             } else {
                 commentEl.classList.remove('read');
                 commentEl.classList.add('unread');
                 if (readBtn) readBtn.style.display = '';
                 if (unreadBtn) unreadBtn.style.display = 'none';
+                // Auto-expand when marked as unread
+                expandComment(commentId);
             }
         }
 
@@ -606,7 +654,8 @@
             const isRead = !!readComments[comment.id];
             const statusClass = isRead ? 'read' : 'unread';
             const hasReplies = comment.replies && comment.replies.length > 0;
-            const isCollapsed = hasReplies && !!collapsedComments[comment.id];
+            // Auto-collapse if explicitly collapsed OR if read
+            const isCollapsed = !!collapsedComments[comment.id] || isRead;
 
             const repliesHtml = hasReplies
                 ? `<div class="replies${isCollapsed ? ' collapsed' : ''}">${comment.replies.map(r => renderComment(r, readComments, collapsedComments)).join('')}</div>`
@@ -619,7 +668,7 @@
                 <div class="comment ${statusClass}${isCollapsed ? ' collapsed-parent' : ''}" data-comment-id="${comment.id}">
                     <div class="comment-header">
                         <span class="comment-meta">
-                            ${hasReplies ? `<button class="collapse-btn" onclick="toggleCollapse(${comment.id})">${isCollapsed ? '+' : '−'}</button>` : ''}
+                            <button class="collapse-btn" onclick="toggleCollapse(${comment.id})">${isCollapsed ? '+' : '−'}</button>
                             <a href="https://news.ycombinator.com/user?id=${comment.by}" target="_blank">${comment.by || 'unknown'}</a>
                             · ${formatTime(comment.time)}
                             ${hasReplies ? `· ${replyCount} repl${replyCount === 1 ? 'y' : 'ies'}` : ''}
