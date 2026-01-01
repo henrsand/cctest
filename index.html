@@ -114,15 +114,14 @@
         }
 
         .comment.unread {
-            font-weight: bold;
             border-left-color: #ff6600;
         }
 
-        .comment.unread .comment-text {
+        .comment.unread > .comment-text {
             font-weight: bold;
         }
 
-        .comment.read .comment-text {
+        .comment.read > .comment-text {
             font-weight: normal;
         }
 
@@ -301,6 +300,15 @@
             updateStats();
         }
 
+        // Mark a comment as unread
+        function markAsUnread(commentId) {
+            const readComments = getReadComments();
+            delete readComments[commentId];
+            saveReadComments(readComments);
+            updateCommentUI(commentId, false);
+            updateStats();
+        }
+
         // Mark a comment and all its descendants as read
         function markTreeAsRead(commentId) {
             const commentEl = document.querySelector(`[data-comment-id="${commentId}"]`);
@@ -357,14 +365,19 @@
             const commentEl = document.querySelector(`[data-comment-id="${commentId}"]`);
             if (!commentEl) return;
 
+            const readBtn = commentEl.querySelector(':scope > .comment-header .mark-read-btn');
+            const unreadBtn = commentEl.querySelector(':scope > .comment-header .mark-unread-btn');
+
             if (isRead) {
                 commentEl.classList.remove('unread');
                 commentEl.classList.add('read');
-                const btn = commentEl.querySelector('.mark-read-btn');
-                if (btn) btn.style.display = 'none';
+                if (readBtn) readBtn.style.display = 'none';
+                if (unreadBtn) unreadBtn.style.display = '';
             } else {
                 commentEl.classList.remove('read');
                 commentEl.classList.add('unread');
+                if (readBtn) readBtn.style.display = '';
+                if (unreadBtn) unreadBtn.style.display = 'none';
             }
         }
 
@@ -488,6 +501,7 @@
                         </span>
                         <div class="comment-actions">
                             <button class="mark-read-btn" onclick="markAsRead(${comment.id})" ${isRead ? 'style="display:none"' : ''}>Mark Read</button>
+                            <button class="mark-unread-btn" onclick="markAsUnread(${comment.id})" ${isRead ? '' : 'style="display:none"'}>Mark Unread</button>
                             ${hasReplies
                                 ? `<button onclick="markTreeAsRead(${comment.id})">Mark Tree Read</button>`
                                 : ''}
