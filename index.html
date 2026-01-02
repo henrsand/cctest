@@ -379,9 +379,10 @@
             history.forEach(item => {
                 const option = document.createElement('option');
                 option.value = item.id;
-                option.textContent = item.title.length > 60
-                    ? item.title.substring(0, 60) + '...'
-                    : item.title;
+                const title = item.title || `Thread ${item.id}`;
+                option.textContent = title.length > 60
+                    ? title.substring(0, 60) + '...'
+                    : title;
                 select.appendChild(option);
             });
         }
